@@ -515,7 +515,7 @@ on every page and not just downloaded when JS fails, size matters more than prec
 
   <style>
 /* extras.css --- Additional CSS for general pages */
-/* Version 00052301 */
+/* Version 00052302 */
 
 /* No extra fonts here, not worth the bandwidth budget */
 
@@ -1404,15 +1404,15 @@ input.marg-tog {display: none;} /* Removes tickbox */
   line-height: 1; /* Fix line height misalignment */
 }
 
-/* Hack for forcing reflow to fix the .sn-right-num rendering bug in Firefox */
-.firefox-resize-fix {display: none !important}
-
 .sn .sn-right-num {
   position: absolute;
   width: 40px;
   text-align: right;
   margin-left: -44px; /* Implicit 4px margin on each side at 48px gutter width */
 }
+
+/* Hack for forcing reflow to fix the .sn-right-num rendering bug in Firefox */
+.firefox-resize-fix {display: none !important}
 
 .sn-right {
   margin-top: 8.5px; 
@@ -3965,6 +3965,17 @@ if (document.readyState !== 'loading') {
 // ----------------------------------------------
 
 (function() {
+  // --- Start of Configuration ---
+  const DEBOUNCE_DELAY = 250; // The debounce time in milliseconds.
+  // --- End of Configuration ---
+
+  // More durable check: Exit if the browser isn't using the Gecko rendering engine.
+  // This is a more robust check that targets the source of the rendering bug.
+  const isGeckoEngine = '-moz-appearance' in document.documentElement.style;
+  if (!isGeckoEngine) {
+    return;
+  }
+
   let isPageLoaded = false;
 
   function debounce(func, wait) {
@@ -3984,7 +3995,6 @@ if (document.readyState !== 'loading') {
       return;
     }
 
-    // *** This is the updated line with the more precise selector ***
     const elements = document.querySelectorAll('.sn.sn-right .sn-right-num');
 
     elements.forEach(el => {
@@ -3995,12 +4005,17 @@ if (document.readyState !== 'loading') {
     });
   }
 
-  const debouncedResizeFix = debounce(applyResizeFix, 150);
+  // Create a debounced version of the fix for resize events.
+  const debouncedResizeFix = debounce(applyResizeFix, DEBOUNCE_DELAY);
 
+  // Apply the fix when the window is resized.
   window.addEventListener('resize', debouncedResizeFix);
 
+  // Apply the fix once after the initial page load.
   window.addEventListener('load', () => {
     isPageLoaded = true;
+    // Apply the fix shortly after load to catch initial rendering glitches.
+    setTimeout(applyResizeFix, 50);
   });
 
 })();
@@ -4121,7 +4136,7 @@ if (document.readyState !== 'loading') {
           <span><a href="https://in10ty.org/users/bendini" class="author-name" rel="author">Bendini</a></span>
         </span><span id=post-date>
           <time datetime=2025-08-18 itemprop=datePublished>Aug 18th 2025</time>
-        </span><span id=version-metadata>Version 0.5</span>
+        </span><span id=version-metadata>Version 0.51</span>
       </div>
       <hr>
     </header>
@@ -6089,7 +6104,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <br class=special>
 <p><strong>This is the end of the mandatory census questions.</strong><br />
 <strong>All questions from this point onwards are optional.</strong></p>
-<p>If you only wanted to answer the mandatory questions, you can <a href="/census/#2.ans">skip to the bottom</a> and create a copy of your private answers to send off.</p>
+<p>If you only wanted to answer the mandatory questions, you can <a href=#2.ans>skip to the bottom</a> and create a copy of your private answers to send off.</p>
 <p>If you’re happy to provide more information, answer as few or as many of the remaining optional questions as you like.</p>
 <h4 id="2.2.6">Q6. Extra contact information</h4>
 <h5 id="Context-4">Context</h5>
@@ -6616,7 +6631,7 @@ document.getElementById('gen_map2_button').addEventListener('click', (e) => draw
 <p>These questions are asked partially so we can see how our ecosystem compares to the proportions found in the wider economy, and partially to get a rough idea of what could be acheived if we could e.g. coordinate 2% of the ecosystem’s total work hours towards a specific goal.</p>
 <h5 id="A._What_is_the_highest_level_of_schooling_you_have_completed?">A. What is the highest level of schooling you have completed?</h5>
 <select id=q15a class=length-480>
-  <option value="">Select option
+  <option value="">Select
   <option value="Dropout">Below high school/No GCSEs
   <option value="GCSE">High school diploma/GCSEs
   <option value="A-level">A-levels (UK only)
@@ -6631,7 +6646,7 @@ document.getElementById('gen_map2_button').addEventListener('click', (e) => draw
 </select>
 <h5 id="B._Current_working_arrangement">B. Current working arrangement</h5>
 <select id=q15b class=length-180>
-  <option value="">Select option
+  <option value="">Select
   <option value="Full">Full-time salaried
   <option value="Part">Part-time salaried
   <option value="Freelance">Self-employed/Freelance
@@ -6643,7 +6658,7 @@ document.getElementById('gen_map2_button').addEventListener('click', (e) => draw
 </select>
 <h5 id="C._Industry">C. Industry</h5>
 <select id=q15c1 class=length-180>
-  <option value="">Select option
+  <option value="">Select
   <option value=a>Academia
   <option value=b>Accounting
   <option value=c>Agriculture/Fishing
@@ -6672,10 +6687,16 @@ document.getElementById('gen_map2_button').addEventListener('click', (e) => draw
   <option value=z>Other (write in)
 </select>
 <br class=special>
-<p>Other: <input type=text id="q15c2"></p>
+<p>Other: <input type=text id=q15c2 class=length-180></p>
+<h5 id="X1._Job_title">X1. Job title</h5>
+<p>This can be your actual job title, or a description of what it really is in under 5 words.
+<input type=text id=q15d class=length-300></p>
+<h5 id="X2._Job_description">X2. Job description</h5>
+<p>I.e. What are your responsibities and the main things you spend time on at work?</p>
+<textarea id=q15e></textarea>
 <h5 id="D._Current_yearly_income_in_USD">D. Current yearly income in USD</h5>
-<select id=q15d class=length-120>
-  <option value="">Select option
+<select id=q15f class=length-120>
+  <option value="">Select
   <option value="$0-$19k">$0-$19k
   <option value="$20-39k">$20-39k
   <option value="$40-59k">$40-59k
@@ -6692,8 +6713,8 @@ document.getElementById('gen_map2_button').addEventListener('click', (e) => draw
 "For individuals, net worth or wealth refers to an individual's net economic position: the value of the individual's assets minus liabilities. Examples of assets that an individual would factor into their net worth are retirement accounts, other investments, home(s), and vehicles. Liabilities include both secured debt (such as a home mortgage) and unsecured debt (such as consumer debt or personal loans). Typically intangible assets such as educational degrees are not factored into net worth, even though such assets positively contribute to one's overall financial position."</span><span class="sn sn-below"><span class="sn-below-num">[C]</span>Wikipedia definition:<br>
 "For individuals, net worth or wealth refers to an individual's net economic position: the value of the individual's assets minus liabilities. Examples of assets that an individual would factor into their net worth are retirement accounts, other investments, home(s), and vehicles. Liabilities include both secured debt (such as a home mortgage) and unsecured debt (such as consumer debt or personal loans). Typically intangible assets such as educational degrees are not factored into net worth, even though such assets positively contribute to one's overall financial position."</span></span>
 and then count any home equity you have as part of your assets, but ignore the part of the mortgage that’s still outstanding.<br>
-<select id=q15e class=length-240></p>
-  <option value="">Select option
+<select id=q15g class=length-240></p>
+  <option value="">Select
   <option value="Below $0">Below $0 due to debt/student loans
   <option value="$0-10k">$0-10k
   <option value="$10k-50k">$10k-50k
@@ -6873,7 +6894,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 <h4 id="2.2.18">Q18. How did you find out about Intentionality?</h4>
 <select id=q18a class=length-360>
-  <option value="">Select option
+  <option value="">Select
   <option value=a>Discovered via LessWrong
   <option value=b>I follow Bendini on Twitter
   <option value=c>A link on a news aggregator (e.g. Reddit, Hackernews)
@@ -6888,7 +6909,7 @@ Other: <input type=text id=q18b>
 <h4 id="2.2.19">Q19. LessWrong exposure</h4>
 <p>How familiar are you with the <a rel="noopener noreferrer" target="_blank" href="https://www.lesswrong.com/library">LessWrong canon</a>?
 <select id=q19 class=length-480></p>
-  <option value="">Select option
+  <option value="">Select
   <option value=0>I hadn't heard about it until now
   <option value=1>I've heard of it
   <option value=2>I've visited the website a few times
@@ -6903,7 +6924,7 @@ Other: <input type=text id=q18b>
 <p>To prevent this from being too complex to categorize, this question is meant for people who grew up in English speaking countries. Anyone who chooses to answer this question will be granted the assumption of honesty, but sufficiently incorrect answers may lower my estimate of your self-awareness.<br></p>
 <h5 id="Class_background:">Class background:</h5>
 <select id=q20 class=length-240>
-<option value="">Select option
+<option value="">Select
   <option value=Foreign>Non-Anglosphere class background
   <option value=UC>Underclass
   <option value=WC>Working Class
@@ -6917,7 +6938,7 @@ Other: <input type=text id=q18b>
 <h5 id="2.2.21">21. What is Bendini’s class background?</h5>
 <p>Answer this using whatever information and context clues you’ve noticed.<br>
 <select id=q21 class=length-150></p>
-  <option value="">Select option
+  <option value="">Select
   <option value=UC>Underclass
   <option value=WC>Working Class
   <option value=UWC>Upper Working Class
@@ -6929,7 +6950,7 @@ Other: <input type=text id=q18b>
 </select>
 <h5 id="2.2.22">22. What class background does Bendini think he has?</h5>
 <select id=q22 class=length-150>
-  <option value="">Select option
+  <option value="">Select
   <option value=UC>Underclass
   <option value=WC>Working Class
   <option value=UWC>Upper Working Class
@@ -6941,7 +6962,7 @@ Other: <input type=text id=q18b>
 </select>
 <h5 id="2.2.23">23. How confident was your guess of question 21?</h5>
 <select id=q23 class=length-150>
-  <option value="">Select option
+  <option value="">Select
   <option value=10>10% - Very unsure
   <option value=20>20%
   <option value=30>30%
@@ -6982,7 +7003,7 @@ document.addEventListener('DOMContentLoaded', function() {
         'q12a', 'q12b',
         'q13a', 'q13b', 'q13c', 'q13d',
         'q14a', 'q14b', 'q14c',
-        'q15a', 'q15b', 'q15c1', 'q15c2', 'q15d', 'q15e',
+        'q15a', 'q15b', 'q15c1', 'q15c2', 'q15d', 'q15e', 'q15f', 'q15g',
         'q16a', 'q16b', 'q16c', 'q16d', 'q16e', 'q16f', 'q16g', 'q16h1', 'q16h2',
         'q17a1', 'q17a2', 'q17b1', 'q17b2', 'q17c1', 'q17c2', 'q17d1', 'q17d2', 'q17e1', 'q17e2', 'q17f1', 'q17f2', 'q17g1', 'q17g2', 'q17h1', 'q17h2', 'q17i1', 'q17i2', 'q17j1', 'q17j2', 'q17k1', 'q17k2', 'q17l1', 'q17l2', 'q17m1', 'q17m2', 'q17n1', 'q17n2', 'q17o1', 'q17o2', 'q17p1', 'q17p2', 'q17q1', 'q17q2', 'q17r1', 'q17r2', 'q17s1', 'q17s2', 'q17t1', 'q17t2', 'q17x0', 'q17x1', 'q17x2',
         'q18a', 'q18b',
@@ -6996,7 +7017,7 @@ document.addEventListener('DOMContentLoaded', function() {
     ];
     // --- List of fields that need newline replacement ---
     const fieldsToReplaceNewline = new Set([
-        'q11a', 'q12a', 'q13c', 'q14a', 'q14b', 'q16h2', 'q24', 'q25'
+        'q11a', 'q12a', 'q13c', 'q14a', 'q14b', 'q15e', 'q16h2', 'q24', 'q25'
     ]);
     surveyForm.addEventListener('submit', function(e) {
         e.preventDefault();
