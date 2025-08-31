@@ -2718,7 +2718,7 @@ code[data-lang="csv-tab26"] {-moz-tab-size: 26; -o-tab-size: 26; tab-size: 26;}
 Device Detection, CSS Variable Calculator, and Scroll Anchoring System
 ================================================================================
 
-VERSION 0.22
+VERSION 0.22 (SVH Landscape Fix)
 
 PURPOSE:
 This script serves two primary functions for creating a highly responsive and stable user experience on complex webpages:
@@ -2734,9 +2734,6 @@ This script serves two primary functions for creating a highly responsive and st
     - This system provides a robust, custom solution to this problem. Before a layout change (e.g., resize), it identifies a "best-fit" element visible in the viewport and records its position.
     - After the layout changes and content reflows, it finds that same element and calculates the scroll difference needed to bring it back to its original position on the screen.
     - This ensures that the user's reading position is maintained, preventing them from getting lost on the page.
-
-3. SIDENOTE BUGFIX
-    - Firefox has a problem with rendering the sidenote index numbers after a page width resize
 
 */
 
@@ -2838,6 +2835,7 @@ let rAFId = null; // Holds the ID for requestAnimationFrame to prevent multiple 
 
 // --- State for layout calculations ---
 let stableReferenceWidthCss = 0; // On mobile, used to store the width on orientation change to prevent reflow from appearing/disappearing browser UI.
+let stableSvhHeight = 0; // +++ ADDED +++: Stores the measured Small Viewport Height in pixels.
 let lastKnownOrientation = ''; // 'portrait' or 'landscape'.
 let lastAppliedDeviceBucket = 0; // The last bucket number that was calculated and applied.
 let lastRecalcWidth = 0; // Stores the window width from the last recalculation event.
@@ -2955,6 +2953,35 @@ function formatPixelValue(value) {
   if (Number.isInteger(num)) { return `${num}px`; }
   return `${num}px`;
 }
+
+// +++ ADDED +++
+/**
+ * Calculates the height of the small viewport (svh) in pixels.
+ * This is the viewport height when browser UI, like the address bar, is visible.
+ * It works by creating a temporary "probe" element, styling it with 100svh,
+ * measuring its computed height, and then removing it.
+ * @returns {number} The height in pixels corresponding to 100svh.
+ */
+function getSvhInPixels() {
+  const probe = document.createElement('div');
+  const style = probe.style;
+  style.position = 'fixed';
+  style.visibility = 'hidden';
+  style.top = '-9999px';
+  style.left = '-9999px';
+  style.height = '100svh';
+
+  if (!document.body) {
+    console.warn('[getSvhInPixels] Document body not ready. Returning 0.');
+    return 0;
+  }
+
+  document.body.appendChild(probe);
+  const heightInPixels = parseFloat(getComputedStyle(probe).height);
+  document.body.removeChild(probe);
+  return heightInPixels;
+}
+
 
 // --- Device Pixel and CSS Pixel Conversion ---
 // These functions are crucial for working with High-DPI (Retina) displays, where
@@ -3111,17 +3138,18 @@ function calculateValues(referenceWidthCssForCalc, deviceBucket) {
   return updateCssVariables(cssVariablesToSet);
 }
 
+// --- MODIFIED ---
 /**
  * The "brain" of the device detection system.
  * It uses a series of heuristics (rules of thumb) based on viewport size, device pixel ratio (DPR),
  * pointer type (fine/mouse vs coarse/touch), and orientation to categorize the device.
+ * @param {number} viewportWidth - The current width of the viewport in CSS pixels.
+ * @param {number} heightForBucketing - The height to use for bucketing (can be stable SVH or live height).
  * @returns {number} The determined device bucket (1-7).
  */
-function determineDeviceBucket() {
+function determineDeviceBucket(viewportWidth, heightForBucketing) {
   // Gather all the raw data about the device and viewport.
   const minScreenDimCssPixels = Math.min(window.screen.width, window.screen.height);
-  const viewportWidth = window.innerWidth;
-  const viewportHeight = window.innerHeight;
   const dpr = window.devicePixelRatio || 1;
   const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
   const isFinePointer = window.matchMedia('(pointer: fine)').matches;
@@ -3131,15 +3159,15 @@ function determineDeviceBucket() {
   // This is a decision tree. It checks various conditions to find the best-fit bucket.
   if (isFinePointer && viewportWidth >= 400) {
     determinedBucket = 1;
-  } else if (isCoarsePointer && window.matchMedia('(orientation: landscape)').matches && dpr >= 1.5 && viewportWidth > 1000 && viewportHeight > 500) {
+  } else if (isCoarsePointer && window.matchMedia('(orientation: landscape)').matches && dpr >= 1.5 && viewportWidth > 1000 && heightForBucketing > 500) {
     determinedBucket = 2;
-  } else if (isCoarsePointer && window.matchMedia('(orientation: portrait)').matches && viewportWidth >= 960 && viewportHeight >= 1000 && dpr >= 1.5) {
+  } else if (isCoarsePointer && window.matchMedia('(orientation: portrait)').matches && viewportWidth >= 960 && heightForBucketing >= 1000 && dpr >= 1.5) {
     determinedBucket = 2;
-  } else if (isCoarsePointer && window.matchMedia('(orientation: landscape)').matches && dpr > 1.5 && viewportWidth >= 600 && viewportHeight < (viewportWidth * 0.7)) {
+  } else if (isCoarsePointer && window.matchMedia('(orientation: landscape)').matches && dpr > 1.5 && viewportWidth >= 600 && heightForBucketing < (viewportWidth * 0.7)) {
     determinedBucket = 3;
-  } else if (isCoarsePointer && window.matchMedia('(orientation: landscape)').matches && dpr >= 0.99 && dpr <= 2.51 && viewportWidth < 1000 && viewportHeight < 700 && minScreenDimCssPixels >= 500) {
+  } else if (isCoarsePointer && window.matchMedia('(orientation: landscape)').matches && dpr >= 0.99 && dpr <= 2.51 && viewportWidth < 1000 && heightForBucketing < 700 && minScreenDimCssPixels >= 500) {
     determinedBucket = 3;
-  } else if (isCoarsePointer && dpr >= 1.66 && viewportWidth >= 630 && viewportHeight >= 550) {
+  } else if (isCoarsePointer && dpr >= 1.66 && viewportWidth >= 630 && heightForBucketing >= 550) {
     determinedBucket = 3;
   } else if (isCoarsePointer && window.matchMedia('(orientation: portrait)').matches) {
     let matchedSpecialPortrait = false;
@@ -3156,7 +3184,7 @@ function determineDeviceBucket() {
             determinedBucket = 6;
         }
     }
-  } else if (isCoarsePointer && window.matchMedia('(orientation: landscape)').matches && viewportWidth <= 600 && viewportHeight <= 500) {
+  } else if (isCoarsePointer && window.matchMedia('(orientation: landscape)').matches && viewportWidth <= 600 && heightForBucketing <= 500) {
     determinedBucket = 6;
   } else if (isCoarsePointer && viewportWidth <= 800 && viewportWidth < (window.screen.width * 2 / 3) ) {
     determinedBucket = 6;
@@ -3169,6 +3197,7 @@ function determineDeviceBucket() {
   }
   return determinedBucket;
 }
+
 
 // --- Specific Bucket Calculation Functions ---
 // Each of these functions knows how to calculate the layout for one specific bucket.
@@ -3351,9 +3380,20 @@ function performFreshCheck() {
   const freshCheckStartTime = performance.now();
   logCheckpoint('Fresh check: Initiated');
 
+  // --- MODIFIED ---
   const currentLiveViewportWidthCss = window.innerWidth;
   const currentLiveOrientation = window.matchMedia('(orientation: landscape)').matches ? 'landscape' : 'portrait';
-  const freshDeviceBucket = determineDeviceBucket();
+  const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  let heightToUseForFreshCheck;
+
+  // For a truly "fresh" check, we re-measure the SVH.
+  if (isCoarsePointer && currentLiveOrientation === 'landscape') {
+      heightToUseForFreshCheck = getSvhInPixels();
+  } else {
+      heightToUseForFreshCheck = window.innerHeight;
+  }
+
+  const freshDeviceBucket = determineDeviceBucket(currentLiveViewportWidthCss, heightToUseForFreshCheck);
 
   let referenceWidthForFreshCheck;
 
@@ -3803,20 +3843,39 @@ function attemptRestoreToPersistentAnchor() {
  * The main handler for 'resize' and 'orientationchange' events.
  * It orchestrates the recalculation of CSS variables and triggers the scroll restoration.
  */
+// --- MODIFIED ---
 function handleDeviceRecalculation() {
   if (ENABLE_FRESH_CHECK && freshCheckTimerId !== null) { clearTimeout(freshCheckTimerId); logCheckpoint('Device change detected (rAF), cleared fresh check.'); }
   startTime = performance.now(); lastCheckpoint = startTime; checkpointCount = 0;
 
-  // 1. Determine the new device state (bucket, orientation, width).
+  // 1. Determine the new device state (orientation, width, height).
   const currentOrientation = window.matchMedia('(orientation: landscape)').matches ? 'landscape' : 'portrait';
   const newViewportWidthCss = window.innerWidth;
   const newViewportHeightCss = window.innerHeight;
-  const newDeviceBucket = determineDeviceBucket();
 
+  // 2. --- NEW SVH LOGIC ---
+  const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  // If orientation changed or we have no stored SVH value, measure it now.
+  if (currentOrientation !== lastKnownOrientation || stableSvhHeight === 0) {
+    stableSvhHeight = getSvhInPixels();
+    console.log(`[Recalc] Orientation changed or first run. Measured stable SVH: ${stableSvhHeight.toFixed(0)}px`);
+  }
+
+  let heightToUseForBucketing;
+  // As requested, only use the stable SVH for bucketing on mobile devices in landscape mode.
+  if (isCoarsePointer && currentOrientation === 'landscape') {
+    heightToUseForBucketing = stableSvhHeight;
+    console.log(`[Recalc] Using stable SVH height (${heightToUseForBucketing.toFixed(0)}px) for landscape bucketing.`);
+  } else {
+    heightToUseForBucketing = newViewportHeightCss; // Otherwise, use the live height.
+  }
+  
+  // Call the modified function with the appropriate height value.
+  const newDeviceBucket = determineDeviceBucket(newViewportWidthCss, heightToUseForBucketing);
+  
   console.log(`[Recalc] Event triggered. Current State: Bucket ${newDeviceBucket}, Width ${newViewportWidthCss.toFixed(0)}, Orient ${currentOrientation}. Previous State: Bucket ${lastAppliedDeviceBucket}, Orient ${lastKnownOrientation}, RecalcW/H: ${lastRecalcWidth}/${lastRecalcHeight}`);
 
-  // 2. Decide what reference width to use for calculations. On mobile, this often uses a "stable" width
-  //    to prevent layout jank from browser UI (like the address bar) appearing/disappearing.
+  // 3. Decide what reference width to use for calculations. This logic remains the same.
   let widthToUseForCalculations;
   if (newDeviceBucket === 1) {
       stableReferenceWidthCss = newViewportWidthCss;
@@ -3833,11 +3892,10 @@ function handleDeviceRecalculation() {
       }
   }
 
-  // 3. Call `calculateValues` to update the CSS variables if needed.
+  // 4. Call `calculateValues` to update the CSS variables if needed.
   const jsMadeLayoutChanges = calculateValues(widthToUseForCalculations, newDeviceBucket);
 
-  // 4. Determine if a scroll restoration is necessary. This happens on orientation change,
-  //    if our script changed the layout, or if the device bucket itself changed.
+  // 5. Determine if a scroll restoration is necessary. This logic remains the same.
   let shouldAttemptRestore = false;
 
   if (currentOrientation !== lastKnownOrientation) {
@@ -3859,17 +3917,16 @@ function handleDeviceRecalculation() {
       shouldAttemptRestore = true;
   }
 
-  // 5. If restoration is needed, request it to happen on the next animation frame.
+  // 6. If restoration is needed, request it to happen on the next animation frame.
   const previousBucketForLog = lastAppliedDeviceBucket;
   if (shouldAttemptRestore && SCROLL_ANCHOR_CONFIG.enableJsAnchoring) {
       console.log(`[Recalc] Conditions met (Prev Bucket: ${previousBucketForLog}, JS Changes: ${jsMadeLayoutChanges}, Orient Change: ${currentOrientation !== lastKnownOrientation}), requesting animation frame for scroll restoration.`);
-      // `requestAnimationFrame` ensures our scroll adjustment happens smoothly right before the browser paints the new layout.
       window.requestAnimationFrame(attemptRestoreToPersistentAnchor);
   } else if (SCROLL_ANCHOR_CONFIG.enableJsAnchoring) {
       console.log('[Recalc] Conditions for scroll restoration NOT met.');
   }
 
-  // 6. Update our state variables for the next event.
+  // 7. Update our state variables for the next event.
   lastKnownOrientation = currentOrientation;
   lastAppliedDeviceBucket = newDeviceBucket;
   lastRecalcWidth = newViewportWidthCss;
@@ -3892,6 +3949,7 @@ function scheduleHandleDeviceChanges() {
 /**
  * The main entry point of the entire script.
  */
+// --- MODIFIED ---
 function init() {
   // 1. Load any stored values from the last session to prevent FOUC.
   _initialize_original();
@@ -3905,7 +3963,10 @@ function init() {
   lastKnownOrientation = initialOrientation;
   lastTrackedScrollY = window.scrollY;
   lastTrackedScrollTime = performance.now();
-  logCheckpoint('Initial setup for calculation.');
+
+  // Measure SVH once on startup to have it ready.
+  stableSvhHeight = getSvhInPixels();
+  logCheckpoint(`Initial setup for calculation. Measured SVH: ${stableSvhHeight.toFixed(0)}px`);
 
   // 3. Create a debounced version of our anchor-setting function for performance.
   if (SCROLL_ANCHOR_CONFIG.enableJsAnchoring) {
@@ -3914,8 +3975,17 @@ function init() {
 
   // 4. Run the initial calculations and set the very first scroll anchor.
   const calculateAndSetInitialAnchor = () => {
-    const initialDeviceBucket = determineDeviceBucket();
-    console.log(`[Init] Bucket: ${initialDeviceBucket}, Width: ${initialViewportWidthCss.toFixed(0)}, Orient: ${initialOrientation}`);
+    const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+    let initialHeightForBucketing;
+    // Use the same logic for the initial calculation: SVH for landscape mobile, live height otherwise.
+    if (isCoarsePointer && initialOrientation === 'landscape') {
+        initialHeightForBucketing = stableSvhHeight;
+    } else {
+        initialHeightForBucketing = window.innerHeight;
+    }
+
+    const initialDeviceBucket = determineDeviceBucket(initialViewportWidthCss, initialHeightForBucketing);
+    console.log(`[Init] Bucket: ${initialDeviceBucket}, Width: ${initialViewportWidthCss.toFixed(0)}, Orient: ${initialOrientation}, HeightUsed: ${initialHeightForBucketing.toFixed(0)}px`);
     lastAppliedDeviceBucket = initialDeviceBucket;
     calculateValues(stableReferenceWidthCss, initialDeviceBucket);
     if (SCROLL_ANCHOR_CONFIG.enableJsAnchoring) {
@@ -3960,65 +4030,6 @@ if (document.readyState !== 'loading') {
 } else {
   document.addEventListener('DOMContentLoaded', init);
 }
-
-// -------- Sidenote rendering bugfix -----------
-// ----------------------------------------------
-
-(function() {
-  // --- Start of Configuration ---
-  const DEBOUNCE_DELAY = 250; // The debounce time in milliseconds.
-  // --- End of Configuration ---
-
-  // More durable check: Exit if the browser isn't using the Gecko rendering engine.
-  // This is a more robust check that targets the source of the rendering bug.
-  const isGeckoEngine = '-moz-appearance' in document.documentElement.style;
-  if (!isGeckoEngine) {
-    return;
-  }
-
-  let isPageLoaded = false;
-
-  function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-      const later = () => {
-        clearTimeout(timeout);
-        func(...args);
-      };
-      clearTimeout(timeout);
-      timeout = setTimeout(later, wait);
-    };
-  }
-
-  function applyResizeFix() {
-    if (!isPageLoaded) {
-      return;
-    }
-
-    const elements = document.querySelectorAll('.sn.sn-right .sn-right-num');
-
-    elements.forEach(el => {
-      el.classList.add('firefox-resize-fix');
-      setTimeout(() => {
-        el.classList.remove('firefox-resize-fix');
-      }, 0);
-    });
-  }
-
-  // Create a debounced version of the fix for resize events.
-  const debouncedResizeFix = debounce(applyResizeFix, DEBOUNCE_DELAY);
-
-  // Apply the fix when the window is resized.
-  window.addEventListener('resize', debouncedResizeFix);
-
-  // Apply the fix once after the initial page load.
-  window.addEventListener('load', () => {
-    isPageLoaded = true;
-    // Apply the fix shortly after load to catch initial rendering glitches.
-    setTimeout(applyResizeFix, 50);
-  });
-
-})();
   </script>
 
 
