@@ -165,9 +165,9 @@ data5_entry = extra_box(extra_data_frame, 4, "Data #5", select_data5_file)
 
 #### Extra scripts
 extra_scripts_label = tk.Label(extra_scripts_frame, text="Validation scripts:").grid(row=0, column=0, columnspan=2)
-pre_py_entry = extra_box(extra_scripts_frame, 1, "Pre-script", select_pre_py_script)
-mid1_py_entry = extra_box(extra_scripts_frame, 2, "Script #3", select_mid1_py_script)
-mid2_py_entry = extra_box(extra_scripts_frame, 3, "Script #4", select_mid2_py_script)
+pre_py_entry =  extra_box(extra_scripts_frame, 1, "Pre-script",  select_pre_py_script)
+mid1_py_entry = extra_box(extra_scripts_frame, 2, "Script #3",   select_mid1_py_script)
+mid2_py_entry = extra_box(extra_scripts_frame, 3, "Script #4",   select_mid2_py_script)
 post_py_entry = extra_box(extra_scripts_frame, 4, "Post-script", select_post_py_script)
 
 ## Output file name entry box
