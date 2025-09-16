@@ -2,8 +2,8 @@
 # ^ line for making this code executable as a program
 
 # Import the relevant modules from the Python Standard Library
-import csv, os, subprocess
-# Import the relevant 3rd party libraries (must be installed by the user)
+import os, shutil, subprocess
+# Import the relevant 3rd party libraries (these must be installed beforehand)
 import tkinter as tk; from tkinter import filedialog, messagebox
 
 # Set the default folder path to the folder ScriptApp is being run from
@@ -44,14 +44,14 @@ def select_extra_py(entry_widget, directory):
         initialdir = scripts_dir, filetypes = [("Python Files", "*.py")])
     entry_widget.delete(0, tk.END); entry_widget.insert(tk.END, file_path); entry_widget.xview_moveto(1)
 
-def select_pre_py_script(): select_extra_py(pre_py_entry, "scripts/validation")
+def select_pre_py_script():  select_extra_py(pre_py_entry,  "scripts/validation")
 def select_mid1_py_script(): select_extra_py(mid1_py_entry, "scripts/validation")
 def select_mid2_py_script(): select_extra_py(mid2_py_entry, "scripts/validation")
 def select_post_py_script(): select_extra_py(post_py_entry, "scripts/validation")
 
 ## ...Processing the chosen data according to the chosen script (i.e. the main buisness logic)
-output_file_name = "ScriptApp_temporary_data.csv" ### Default file name, gets overwritten each time
-processing_complete = 0 ### Prevents old temp file from being saved
+output_file_name = "scriptapp-temp-data.csv" ### Default temp file name, gets overwritten each time a script runs
+processing_complete = 0 ### Prevents the old temp file from being saved
 
 def process_data():
     global processing_complete
@@ -61,7 +61,7 @@ def process_data():
         messagebox.showwarning("Warning", "Please select a main Python script and main CSV data file.")
         return
     extra_entries = [data2_entry, data3_entry, data4_entry, data5_entry, mid1_py_entry, mid2_py_entry]
-    extra_args = [] # Condenses a long list of command line arguments
+    extra_args = [] ### Condenses the long list of command line arguments
     for entry in extra_entries:
         if os.path.isfile(entry.get()):
             extra_args.append(entry.get())
@@ -79,7 +79,7 @@ def process_data():
             processing.wait()
             if os.path.isfile(post_py_entry.get()):
                 subprocess.Popen(["python3", post_py_entry.get(), output_file_name]) ### Postscript
-            processing_complete = 1 ### Allows user to save the new temp file
+            processing_complete = 1 ### Allows the new temp file to be saved
             messagebox.showinfo("Success", "Processing completed.")
     except Exception as e:
         messagebox.showerror("Error", str(e))
@@ -97,35 +97,31 @@ def view_output_csv():
 
 ## ...Navigating to the chosen subfolder
 def select_subfolder():
-	data_directory = os.path.join(current_dir, "data")
-	subfolder_path = filedialog.askdirectory(initialdir=data_directory)
-	subfolder_entry.delete(0, tk.END); subfolder_entry.insert(tk.END, subfolder_path)
+    data_directory = os.path.join(current_dir, "data")
+    subfolder_path = filedialog.askdirectory(initialdir=data_directory)
+    subfolder_entry.delete(0, tk.END); subfolder_entry.insert(tk.END, subfolder_path)
 
 ## ...Saving the output data file
-output_file_name_temp = output_file_name
+output_file_name_temp = output_file_name ### Hack that makes running scripts more flexible
 
 def save_output_csv():
-	output_file_name = output_file_name_entry.get()
-	subfolder_path = subfolder_entry.get()
-	if output_file_name and subfolder_path and processing_complete==1:
-		try:
-			output_file_path = os.path.join(subfolder_path, output_file_name + ".csv")
-			with open(output_file_name_temp, 'r') as input_file, open(output_file_path, 'w', newline='') as output_file:
-				reader = csv.reader(input_file, delimiter='\t')
-				writer = csv.writer(output_file, delimiter='\t')
-				writer.writerows(reader)
-			messagebox.showinfo("Success", f"Output CSV saved as {output_file_name} in {subfolder_path}")
-		except Exception as e:
-			messagebox.showerror("Error", str(e))
-	else:
-		messagebox.showwarning("Warning", "Please enter the output file name, output folder and make sure you have processed the data before trying to save it.")
+    output_file_name = output_file_name_entry.get()
+    subfolder_path = subfolder_entry.get()
+    if output_file_name and subfolder_path and processing_complete==1:
+        try:
+            shutil.copy(output_file_name_temp, os.path.join(subfolder_path, f"{output_file_name}.csv"))
+            messagebox.showinfo("Success", f"Output CSV saved as {output_file_name} in {subfolder_path}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    else:
+        messagebox.showwarning("Warning", "Please enter the output file name, output folder and make sure you have processed the data before trying to save it.")
 
 # Code for displaying the graphical user interface that makes use of the above functions
 ## Create the main window
 window = tk.Tk(); window.title("ScriptApp")
-window.grid_rowconfigure([0,1,2,3,4,5,6,7,8], pad=8) # Specifies which rows of the UI to space out
+window.grid_rowconfigure([0,1,2,3,4,5,6,7,8], pad=5) ### Specifies which rows of the UI to space out
 
-spacing_frame = tk.Frame(window).grid(row=0, column=0, columnspan=5) # Top padding
+spacing_frame = tk.Frame(window).grid(row=0, column=0, columnspan=5) ### Top padding
 
 ## Python main script selection box
 py_script_frame = tk.Frame(window); py_script_frame.grid(row=1, column=0, columnspan=5)
@@ -135,7 +131,7 @@ py_script_button = tk.Button(py_script_frame, text="Browse", command=select_main
 
 ## Instructions box
 instructions_frame = tk.Frame(window); instructions_frame.grid(row=2, column=0, columnspan=5)
-instructions_label = tk.Label(instructions_frame, text="    Read instructions:").grid(row=0, column=0) # Hack to center text
+instructions_label = tk.Label(instructions_frame, text="    Read instructions:").grid(row=0, column=0) ### Hack to center text correctly
 textbox = tk.Text(instructions_frame, width=98, height=32)
 scroll = tk.Scrollbar(instructions_frame, command=textbox.yview); scroll.grid(row=1, column=1, sticky="ns")
 textbox.configure(state="normal", wrap="word", font=("Arial", 10), yscrollcommand=scroll.set); textbox.grid(row=1, column=0)
@@ -155,10 +151,10 @@ extra_scripts_frame = tk.Frame(big_frame); extra_scripts_frame.grid(row=0, colum
 
 ### Function for creating extra data and script input boxes
 def extra_box(parent_frame, row, entry_text, button_command):
-	frame = tk.Frame(parent_frame); frame.grid(row=row, column=0, columnspan=2)
-	entry = tk.Entry(frame, width=16); entry.insert(0, entry_text); entry.grid(row=0, column=0)
-	button = tk.Button(frame, text="Browse", command=button_command); button.grid(row=0, column=1)
-	return entry # Allows the entry box to take user input
+    frame = tk.Frame(parent_frame); frame.grid(row=row, column=0, columnspan=2)
+    entry = tk.Entry(frame, width=16); entry.insert(0, entry_text); entry.grid(row=0, column=0)
+    button = tk.Button(frame, text="Browse", command=button_command); button.grid(row=0, column=1)
+    return entry #### Allows the entry box to take user input
 
 #### Extra data
 extra_data_label = tk.Label(extra_data_frame, text="Extra data:").grid(row=0, column=0, columnspan=2)
@@ -178,7 +174,7 @@ post_py_entry = extra_box(extra_scripts_frame, 4, "Post-script", select_post_py_
 output_file_name_frame = tk.Frame(window); output_file_name_frame.grid(row=5, column=0, columnspan=5)
 output_file_name_label = tk.Label(output_file_name_frame, text="Choose output file name:").grid(row=0, column=0, columnspan=5)
 output_file_name_entry = tk.Entry(output_file_name_frame, width=36); output_file_name_entry.grid(row=1, column=0)
-csv_suffix = tk.Label(output_file_name_frame, text=".csv").grid(row=1, column=1) # Adds .csv to reduce ambiguity for the user
+csv_suffix = tk.Label(output_file_name_frame, text=".csv").grid(row=1, column=1) ### Adds .csv to reduce ambiguity for the user
 
 ## Subfolder selection box
 subfolder_frame = tk.Frame(window); subfolder_frame.grid(row=6, column=0, columnspan=5)
@@ -189,7 +185,7 @@ subfolder_button = tk.Button(subfolder_frame, text="Browse", command=select_subf
 ## Save output CSV button
 save_button = tk.Button(window, text="Save Output CSV", command=save_output_csv).grid(row=7, column=0, columnspan=5)
 
-spacing_frame = tk.Frame(window).grid(row=8, column=0, columnspan=5) # Bottom padding
+spacing_frame = tk.Frame(window).grid(row=8, column=0, columnspan=5) ### Bottom padding
 
 # Start the graphical interface
 window.mainloop()
