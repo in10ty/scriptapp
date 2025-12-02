@@ -15,10 +15,12 @@ Explicitly Stated Intentions:
 
 ## Define special dunder (double underscore) variables
 __author__ = "bendini"  # The Github username of this script's owner/maintainer
-__version__ = "0.1.001"  # (This version number is also displayed in the UI for screenshot purposes)
+__version__ = "0.2.007"  # (This version number is also displayed in the UI for screenshot purposes)
 
 ## Import relevant modules from the Python Standard Library (reason for use given in side comments)
 import ast  # Used for safely parsing Python code to extract docstrings
+import os  # Used for more robust cross platform support
+import platform  # Used for detecting the user's OS
 import shlex  # Used to print a safe command line argument for use outside ScriptApp
 import shutil  # Used to copy and move files
 import subprocess  # Used to execute the user's Python scripts
@@ -32,9 +34,9 @@ try:  # Try to do the following...
     from tkinter import filedialog as fd, messagebox
 except ImportError:  # Do this if there's a problem during the "try:" code
     ### If importing fails, print a console message (using input() so it won't close instantly)
-    input("ERROR: Tkinter must be installed first for ScriptApp to work. (Press Enter to exit...)")
+    input("ERROR: Tkinter must be installed first for ScriptApp to work.\n\nPress Enter to exit...")
 
-## Define global constants (can be used anywhere in the code, WON'T be modified by the code)
+## Define global constants (can be used anywhere in the code, **won't** be modified by the code)
 ### Set folder locations
 BASE_FOLDER = Path(__file__).parent.resolve()  # Sets the base folder relative to this file's path
 P_DATA = BASE_FOLDER / "data"  # Set the path for... CSV data
@@ -88,7 +90,7 @@ SAPP = {  # (Arguments have fixed positions, allowing scripts to use sys.argv[n]
     "postscript_arg_keys": ["postscript", "output_csv", "main_script"],
     ##### Automatic form input filling and folder creation
     "autofills": {"path": P_AUTOFILLS, "type": CSV_AUTOFILL},  # Autofill folder for manual loading
-    "af_override_file": {"path": BASE_FOLDER, "name": AF_OVERRIDE_NAME},  # Autofill on startup
+    "af_override_file": {"path": BASE_FOLDER, "name": AF_OVERRIDE_NAME},  # Autofill on startup file
     "folders": [P_DATA, P_AGN_DATA, P_SCRIPTS, P_VALIDS, P_MODULES, P_RUST, P_AUTOFILLS, P_TEMP],
     ##### Automatic saving of output data and console logs from previous runs
     "console_file": {"path": BASE_FOLDER, "name": TEMP_CONSOLE_NAME},  # Captures all console output
@@ -105,17 +107,12 @@ VBZ/7DoovzL3JxjDHRQBmkelhb5fngcpAmigPCoHxwA0AAB8BjHRl/SRZXPFHn8nrtDOhJjaRiQC9DsO
 qODKVQ0IQIWnE6goTRE3kRiNDxykVVBIuv+6HkEYUhVw+/jOAizAZ0ZjTBt7EhX1tavOBVmUhMgVBCbU+BHyb7cOHtCEQZMSSa4R
 9ADkVgLJEX4gAAAABJRU5ErkJggg=="""  # Embedded .png data for af_icon so ScriptApp can stay as 1 file
 
-## Define global state variables (can be used anywhere in the code, CAN be modified by the code)
-script_requirements = None
-headless_warnings = False
-suppress_mod_popup = False
-last_run_successful = False
-current_run_timestamp = None
-instructions_box = None
-inputs = {}
-optional_entry_box_refs = {}
-last_successful_run_context = {}
-log_file_handle = None  # Holds the reference to the open console log file
+## Define global state variables (can be used anywhere in the code, **can** be modified by the code)
+inputs = {}  # Used to store inputs made into the UI by the user
+last_run_successful = False  # Used to check if the last run was successfully completed
+log_file = None  # Holds the reference to the open console log file
+optional_entry_box_refs = {}  # Used for toggling optional input boxes
+
 
 # endregion --- Initial setup completed ---
 
@@ -141,42 +138,39 @@ def resolve_path(path_string):
 
 
 ### Define a function to... format a filepath for displaying to the user
-def get_display_path(path_string):
+def get_display_path(path_string, is_folder=False):
     """Creates a shortened (but still valid) filepath relative to the base folder."""
-    ### Handle empty input boxes by returning them as an empty string
+    #### Handle empty input boxes by returning them as an empty string
     if not path_string:
         return ""
-    ### Get the full, absolute filepath
+    #### Get the full, absolute filepath
     absolute_path = resolve_path(path_string)
     #### Handle invalid or non-path strings by returning them unchanged
     if not absolute_path:
         return str(path_string)
-    #### Try to make the path relative to the base folder...
+    #### Try to make the path relative to the base folder
     try:
         display_path = str(absolute_path.relative_to(BASE_FOLDER))
     ##### ...but fallback to using the absolute path if this fails
     except ValueError:
         display_path = str(absolute_path)
-    #### Add a trailing slash if the path is a directory (folder) instead of a file
-    if absolute_path.is_dir() and not display_path.endswith("/"):
+    #### Add a trailing slash if the path is (or will be) a directory (folder) instead of a file
+    if (is_folder or absolute_path.is_dir()) and not display_path.endswith("/"):
         display_path += "/"
     #### Return the final formatted string
     return display_path
 
 
-### Define a function to... log all print statements to a text file
+### Define a function to... log a copy of all print statements to a file when it's open
 def print(*args, **kwargs):
-    """Enhances Python's default print() function so it also writes print messages to a log file."""
-    #### Attempt to do all of the following things:
+    """Enhances Python's default print() function so that it saves them to a log file if open."""
+    #### Try to write the print message to the log file, if the log file exists and it's open
     try:
-        ##### Construct the message exactly as print would output it
-        msg = " ".join(map(str, args)) + kwargs.get("end", "\n")
-        ##### If the global log file handle is open, write to it
-        if log_file_handle and not log_file_handle.closed:
-            log_file_handle.write(msg)
-    ##### ...And if any of those things fail:
+        if log_file and not log_file.closed:
+            log_file.write(" ".join(map(str, args)) + kwargs.get("end", "\n"))
+    ##### ...And if this try code fails, do nothing so that ScriptApp won't crash
     except Exception:
-        pass  # Do nothing about it, so that ScriptApp won't crash
+        pass
     #### Call Python's normal print function afterwards
     __builtins__.print(*args, **kwargs)
 
@@ -189,51 +183,33 @@ def ui_event(message_type, message):
     ### Handle each type of message appropriately
     if message_type == "error":
         print(f"UI Message - Error: {message}")
-        messagebox.showerror("Error", message)
+        messagebox.showerror("Error", message, parent=scriptapp)
     elif message_type == "warn":
         print(f"UI Message - Warning: {message}")
-        messagebox.showwarning("Warning", message)
-    elif message_type == "info":
-        print(f"UI Message - Info: {message}")
-        messagebox.showinfo("Info", message)       
-    else:  # (If the type wasn't specified as "error", "warn" or "info")
+        messagebox.showwarning("Warning", message, parent=scriptapp)
+    #### If the type wasn't specified or wasn't a valid type, print an error to the console
+    else:
         print("ui_event function error: invalid message type specified")
 
 
 ### Define a function to... handle our special Markdown table CSV format
-def read_markdown_csv(file_path=None, mode="read", data=None, header=None, content=None):
-    """Safely reads, writes, or updates a Markdown-formatted CSV file."""
-    ### Handle the logic for reading data from the file
-
-    try:
-        #### If content isn't provided directly, read it from the file
-        if content is None and file_path:
-            try:
-                content = Path(file_path).read_text(encoding="utf-8")
-            ##### If it's not in utf-8, reject it instead of solving the user's incorrect encoding
-            except UnicodeDecodeError:
-                raise ValueError(f"Error: '{Path(file_path).name}' is not encoded in UTF-8")
-
-        lines = content.strip().split("\n")
-
-        #### Validate format: needs at least a header and a separator line (---)
-        if len(lines) < 2 or "---" not in lines[1]:
-            return []
-
-        #### Find where the data actually starts (after the separator line)
-        data_index = -1
-        for i, line in enumerate(lines):
-            if "---" in line:
-                data_index = i + 1
-                break
-
-        if data_index == -1 or data_index >= len(lines):
-            return []  # Header exists, but no data rows
-
-        #### Split lines by the pipe separator " | " to create a list of lists
-        return [[cell.strip() for cell in line.split(" | ")] for line in lines[data_index:]]
-    except (FileNotFoundError, AttributeError):
+def read_markdown_csv(file_path=None, content=None):
+    """Safely reads a Markdown-formatted CSV file."""
+    #### If content isn't provided as raw data, read it from the file provided
+    if content is None and file_path:
+        content = Path(file_path).read_text(encoding="utf-8")
+    #### If we still don't have content (e.g. file_path was None), return an empty list
+    if not content:
         return []
+    #### Split the content into lines
+    lines = content.strip().splitlines()
+    #### Find the index of the separator line (---) to determine where data begins
+    start = next((i + 1 for i, y in enumerate(lines) if "---" in y), -1)
+    #### If no separator is found or the index is invalid, return an empty list
+    if start <= 0 or start >= len(lines):
+        return []
+    #### Parse the data rows by splitting on the pipe separator and removing any space padding
+    return [[c.strip() for c in y.split("|")] for y in lines[start:]]
 
 
 ## --- Define the complex event handler functions (listed in order of use) ---
@@ -242,235 +218,251 @@ def read_markdown_csv(file_path=None, mode="read", data=None, header=None, conte
 ### Define a function to... select the main Python script and process its side effects
 def select_main_script(entry_box, instructions_box):
     """Event handler for selecting the main script and updating UI options."""
-    global script_requirements
-
-    def extract_script_metadata(script_path):
-        """Simple parser for script requirements."""
-        reqs = {}
-        try:
-            content = script_path.read_text(encoding="utf-8")
-            docstring = ast.get_docstring(ast.parse(content))
-            if docstring:
-                rows = read_markdown_csv(content=docstring)
-                data_map = {row[0].strip(): row[1].strip() for row in rows if len(row) >= 2}
-
-                # Only check for the specific keys we care about in Simple Mode
-                if "extras disabled" in data_map:
-                    reqs["extras disabled"] = [
-                        x.strip() for x in data_map["extras disabled"].split(",")
-                    ]
-        except Exception:
-            pass
-        return reqs
-
-    def configure_ui_from_metadata(requirements):
-        """Disables UI boxes based on metadata."""
-        keys_to_disable = requirements.get("extras disabled", [])
-
-        # 1. Enable everything first
-        for key in SAPP["optional_arg_keys"]:
-            if key in optional_entry_box_refs:
-                optional_entry_box_refs[key]["entry"].config(state="normal", fg="black")
-                optional_entry_box_refs[key]["button"].config(state="normal")
-
-        # 2. Disable requested boxes
-        for key in keys_to_disable:
-            if key in optional_entry_box_refs:
-                entry = optional_entry_box_refs[key]["entry"]
+    #### Validate the selected path and exit if it isn't a valid file
+    path = resolve_path(entry_box.get())
+    if not path or not path.is_file():
+        return
+    #### Extract the docstring and metadata Markdown table from the provided script if it's present
+    docstring, disabled_keys = None, []
+    try:
+        content = path.read_text(encoding="utf-8")
+        docstring = ast.get_docstring(ast.parse(content))
+        if docstring:
+            rows = read_markdown_csv(content=docstring)
+            data = {r[0].strip(): r[1].strip() for r in rows if len(r) >= 2}
+            if "extras disabled" in data:
+                disabled_keys = [x.strip() for x in data["extras disabled"].split(",")]
+    except Exception:
+        pass
+    #### Update the optional UI boxes based on the metadata that was found
+    for key in SAPP["optional_arg_keys"]:
+        if key in optional_entry_box_refs:  # (This condition seperates the protocol from the UI)
+            entry = optional_entry_box_refs[key]["entry"]
+            button = optional_entry_box_refs[key]["button"]
+            ##### Disable the box if this is requested by the metadata
+            if key in disabled_keys:
                 entry.delete(0, tk.END)
                 entry.insert(0, SAPP[key]["hint"])
                 entry.config(state="disabled", fg=HINT_COLOR)
-                optional_entry_box_refs[key]["button"].config(state="disabled")
-
-    # Logic Start
-    resolved_path = resolve_path(entry_box.get())
-
-    if not resolved_path or not resolved_path.is_file():
-        script_requirements = {}
-        return
-
-    script_requirements = extract_script_metadata(resolved_path)
-    configure_ui_from_metadata(script_requirements)
-
-    # Simple Instructions: Just read the Docstring
+                button.config(state="disabled")
+            ###### Otherwise, enable the box and ensure the text color is set correctly
+            else:
+                is_hint = entry.get() == SAPP[key]["hint"]
+                entry.config(state="normal", fg=HINT_COLOR if is_hint else "black")
+                button.config(state="normal")
+    #### Load the instructions
+    ##### Clear any existing text from the instructions box first
     instructions_box.config(state="normal")
     instructions_box.delete("1.0", tk.END)
-
     try:
-        content = resolved_path.read_text(encoding="utf-8")
-        docstring = ast.get_docstring(ast.parse(content))
-        if docstring:
-            instructions_box.insert(tk.END, docstring)
+        ##### Attempt to find and load Markdown instructions with the same name as the script
+        md_path = path.with_suffix(".md")
+        if md_path.exists():
+            instructions_box.insert(tk.END, md_path.read_text(encoding="utf-8"))
+        ##### If no Markdown file was present, fallback to its Python docstring
         else:
-            instructions_box.insert(tk.END, "No instructions found.")
+            instructions_box.insert(tk.END, docstring if docstring else "No instructions found.")
+    ##### If there was an error instead of a mere absence, insert the message into the box
     except Exception:
-        instructions_box.insert(tk.END, "Error reading script.")
-
+        instructions_box.insert(tk.END, "Error reading instructions.")
+    #### Prevent the user from editing the box contents once loaded (also improves tab navigation)
     instructions_box.config(state="disabled")
 
 
-## Define a function to... process all input data with the chosen scripts
+### Define a function to... process all input data with the chosen scripts
 def run_scripts(app, run_button, success_label, success_message):
     """Central function that executes the script processing pipeline."""
-    global last_run_successful, last_successful_run_context
+    #### State the global variables this function may change
+    global last_run_successful, log_file
+    #### Capture user inputs once so we don't need to retreive them for each script
+    filepaths = {key: value.get() for key, value in inputs.items()}
 
-    # 1. Validation
-    if not inputs["main_script"].get() or not resolve_path(inputs["main_script"].get()).is_file():
-        ui_event("warn", "Please select a main script.")
-        return
-
-    # 2. Prep
-    print("\n--- [starting] - ScriptApp Simple run ---\n")
-    run_button.config(state="disabled")
-    app.update()  # Force a UI update right now since it will freeze during processing
-    start_time = time.monotonic()
-    filepaths = {k: v.get() for k, v in inputs.items()}
-
-    # 3. Execution Helper
+    #### Define a helper function to... run each of the 3 external script types (pre/main/post)
     def run_this_script(key_list):
-        script_key = key_list[0]
-        script_path = filepaths.get(script_key)
-        # Skip if empty or hint
-        if not script_path or script_path == SAPP[script_key]["hint"]:
-            return True
+        """Helper to run each individual script in the pipeline."""
+        ##### Identify the specific script type and the path provided by the user
+        key = key_list[0]
+        script_path = filepaths.get(key)
+        ##### Skip it if the provided script path was empty or just the hint text
+        if not script_path or script_path == SAPP[key]["hint"]:
+            return True  # (returning as True prevents errors when a script is absent)
+        ##### Announce the start of this specific script's execution in the console log
+        print(f"""--- [{key}] - starting "{Path(script_path).name}" ---""")
+        ##### Start the timer for this specific script
+        script_start_time = time.monotonic()
 
-        print(f"--- Running {script_key}: {Path(script_path).name} ---")
+        ##### Define a helper function to... recursively unpack SAPP keys into arguments
+        def unpack_keys(keys):
+            ###### Go through the list of keys one by one
+            for key in keys:
+                value = SAPP[key]
+                ####### If the current key is a list of keys, unpack it
+                if isinstance(value, list):
+                    yield from unpack_keys(value)
+                ####### If the key is not a list, add it to the arguments, otherwise add an "x"
+                else:
+                    if "name" in value:  # If it's a hardcoded value, convert to a display path
+                        path = get_display_path(value["path"] / value["name"])
+                    else:  # If it's user-provided
+                        path = filepaths.get(key)  # (It's already pre-converted to a display path)
+                    yield path if path and path != value.get("hint") else "x"
 
-        # (Simplified arg construction logic for brevity)
-        def build_args_recursive(keys):
-            res = []
-            for k in keys:
-                if isinstance(SAPP.get(k), list):
-                    res.extend(build_args_recursive(SAPP[k]))
-                elif k in SAPP:
-                    if "name" in SAPP[k]:
-                        res.append(str(SAPP[k]["path"] / SAPP[k]["name"]))
-                    else:
-                        val = filepaths.get(k)
-                        res.append(val if val and val != SAPP[k]["hint"] else "x")
-            return res
-
-        cmd_args = build_args_recursive(key_list)
-        # Clean trailing 'x'
-        while cmd_args and cmd_args[-1] == "x":
-            cmd_args.pop()
-
-        # Run
-        full_cmd = ["python3", cmd_args[0]] + cmd_args[1:]
-        print(f"Command: {shlex.join([Path(x).name for x in full_cmd])}\n")
-
+        ##### Construct the command line argument for the subprocess and print a copy for the user
+        arguments = list(unpack_keys(key_list))
+        while arguments and arguments[-1] == "x":
+            arguments.pop()
+        command = ["python3", *arguments]
+        print(f"--- Command line argument:\n{shlex.join(command)}\n")
+        ##### Execute the script and handle errors
         try:
-            result = subprocess.run(
-                full_cmd, cwd=BASE_FOLDER, capture_output=True, text=True
-            )  # Note: running scripts on the shared main thread like this causes the UI to freeze
+            ###### Run the script as a subprocess and capture its output
+            result = subprocess.run(command, cwd=BASE_FOLDER, capture_output=True, text=True)
             print(result.stdout)
+            ###### If the script returned an error code, alert the user and stop
             if result.returncode != 0:
-                ui_event("error", f"Script failed:\n{result.stderr}")
-                return False
+                return ui_event("error", f"Script failed:\n{result.stderr}")
+            ###### Calculate the execution time for this specific script
+            script_duration = time.monotonic() - script_start_time
+            print(f"--- [{key}] - Finished in {script_duration:.3f}s ---\n")
+            ###### Return True to indicate the script finished successfully
             return True
-        except Exception as e:
-            ui_event("error", f"Execution error: {e}")
-            return False
+        ###### Handle any unexpected system errors during execution
+        except Exception as error:
+            return ui_event("error", f"Execution error: {error}")
 
-    # 4. Pipeline
+    #### Check if the user has selected the mandatory input files, and that they actually exist
+    for key, label in [("main_script", "main script"), ("input_csv", "main CSV")]:
+        path = inputs[key].get()
+        if not path:  # Did the user leave the box empty?
+            return ui_event("warn", f"Please select a {label}.")
+        if not resolve_path(path).is_file():  # Does the file actually exist?
+            return ui_event("warn", f"The selected {label} could not be found:\n{path}")
+
+    #### Perform the initial setup for the run
+    ##### Disable the Run Scripts button in the UI to prevent interference during processing
+    run_button.config(state="disabled")
+    ##### Force a UI update immediately (since it will freeze during processing)
+    app.update()
+    ##### Start the total execution timer
+    start_time = time.monotonic()
+    ##### Create a fresh console log file if logging is enabled
+    if inputs["log?"].get():
+        log_file_path = SAPP["console_file"]["path"] / SAPP["console_file"]["name"]
+        log_file = open(log_file_path, "w", encoding="utf-8")
+    ##### Announce the start of the run in the console
+    start_utc = f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} UTC"
+    print(f"--- [start] - ScriptApp run started at: {start_utc} ---\n")
+
+    #### Attempt to execute the script pipeline
     try:
-        # Pre-script
-        if not run_this_script(SAPP["prescript_arg_keys"]):
-            return
-        # Main
-        if not run_this_script(SAPP["main_script_arg_keys"]):
-            return
-        # Post-script
-        if not run_this_script(SAPP["postscript_arg_keys"]):
-            return
+        ##### Run the scripts in sequence, and stop immediately if any provided script crashes
+        pipeline_completed = (
+            run_this_script(SAPP["prescript_arg_keys"])
+            and run_this_script(SAPP["main_script_arg_keys"])
+            and run_this_script(SAPP["postscript_arg_keys"])
+        )
+        ##### Handle a successful run completion
+        if pipeline_completed:
+            last_run_successful = True
+            ##### Calculate the total execution time and print it with a success message
+            duration = time.monotonic() - start_time
+            print(f"--- [success] - Total time: {duration:.3f}s ---\n")
+            ##### Display the success message to the user
+            success_label.config(text=success_message)
+            app.after(3000, lambda: success_label.config(text=""))
 
-        # Success
-        last_run_successful = True
-        # Save context for "Save Output" button
-        last_successful_run_context = {"input_csv_path": inputs["input_csv"].get()}
-
-        duration = time.monotonic() - start_time
-        print(f"\n--- [success] - time: {duration:.3f}s ---\n")
-        success_label.config(text=success_message)
-        app.after(3000, lambda: success_label.config(text=""))
-
-        # Archive previous logs (Simple Rename)
-        log_src = SAPP["console_file"]["path"] / SAPP["console_file"]["name"]
-        if log_src.exists():
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            shutil.copy(log_src, P_TEMP / f"{timestamp}_console.txt")
-
+    #### Perform remaining tasks after the script pipeline execution has been attempted
     finally:
-        run_button.config(state="normal")
+        ##### If the log file was recording, close it so it stops recording
+        if log_file:
+            log_file.close()
+            log_file = None
+        ##### Calculate an ISO 8601 UTC timestamp for archiving and replace the colons on Windows
+        timestamp = f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}"
+        if platform.system() == "Windows":  # (Because Windows can't handle filenames with colons)
+            timestamp = timestamp.replace(":", "-")  # Replaces any colons with dashes
+        ##### Archive the files if the user has enabled logging
+        if inputs["log?"].get():
+            ###### Archive the console log
+            archive_folder = SAPP["last_outputs_archive"]["path"]
+            if log_file_path.exists():  # (Prevents errors if it doesn't exist)
+                shutil.copy(log_file_path, archive_folder / f"{timestamp}-console.txt")
+            ###### Archive the output CSV if the run was successful
+            if last_run_successful:
+                output_file = SAPP["output_csv"]["path"] / SAPP["output_csv"]["name"]
+                if output_file.exists():  # (Prevents errors if it doesn't exist)
+                    shutil.copy(output_file, archive_folder / f"{timestamp}-last-output.csv")
+        ##### Re-enable the button after a minimum 1 sec delay (to prevent UTC timestamp conflicts)
+        delay = max(0, 1000 - int((time.monotonic() - start_time) * 1000))  # (1000 milliseconds)
+        app.after(delay, lambda: run_button.config(state="normal"))
 
 
-## Define a function to... view the output data in a spreadsheet
+### Define a function to... view the output data in a spreadsheet
 def view_output():
     """Opens the temporary output file in LibreOffice & autoconfigures mdcsv files if detected."""
-    ### Construct the full output file path from the SAPP dictionary
-    output_file_path = SAPP["output_csv"]["path"] / SAPP["output_csv"]["name"]
-
-    ### Check if an output file exists
-    if not output_file_path.exists():
-        ui_event("error", "Output file not found. Please run scripts first.")
-        return
-
-    ### Determine if the file is our special Markdown format
-    is_markdown = False
-    try:
-        with open(output_file_path, "r", encoding="utf-8") as f:
-            # Check the first 5 lines for the table separator signature
-            for _ in range(5):
-                if "---" in f.readline():
-                    is_markdown = True
-                    break
-    except Exception:
-        pass  # If we can't read it (e.g. binary), assume it's not Markdown
-
-    ### Launch the application
-    try:
-        command = ["libreoffice", "--calc"]
-        
-        #### Apply the Markdown CSV config flags if the file is mdcsv format
-        if is_markdown:
-            command.append("--infilter=CSV:7C,34,UTF-8")
-            
-        command.append(str(output_file_path))
-        subprocess.Popen(command)
-    except Exception as error:
-        ui_event("error", f"Failed to open LibreOffice:\n{error}")
-
-
-## Define a function to... save the temporary output file permanently
-def save_output(app, button, success_message):
-    """Saves the output file to the user's chosen location."""
+    #### Prevent the user from inadvertently opening the output of an old run if this one failed
     if not last_run_successful:
-        ui_event("warn", "Run scripts first.")
-        return
-
-    name, folder = inputs["output_name"].get(), inputs["output_folder"].get()
-    if not (name and folder):
-        ui_event("warn", "Select name and folder.")
-        return
-
-    src = SAPP["output_csv"]["path"] / SAPP["output_csv"]["name"]
-    dest = resolve_path(folder) / f"{name}.csv"
-
-    if dest.exists():
-        if not messagebox.askyesno("Confirm", f"Overwrite {dest.name}?"):
-            return
-
+        return ui_event("warn", "Run Scripts must succeed before trying to view its output.")
+    #### Construct the full output file path from the SAPP dictionary
+    output_file_path = SAPP["output_csv"]["path"] / SAPP["output_csv"]["name"]
+    #### Check if an output file exists
+    if not output_file_path.exists():
+        return ui_event("error", "Output file not found. Please run scripts first.")
+    #### Attempt to launch the application
     try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(src, dest)
+        ##### Determine the executable command (Default to Linux "libreoffice" command)
+        executable = "libreoffice"
+        system = platform.system()
+        ##### Override the command with the absolute path for Windows or macOS
+        if system == "Windows":
+            prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+            executable = str(Path(prog_files) / "LibreOffice/program/soffice.exe")
+        elif system == "Darwin":  # (The back-end name for macOS)
+            executable = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+        ##### Create the starting command to open LibreOffice Calc
+        command = [executable, "--calc"]
+        ##### If the file uses our mdcsv format, add flags that will allow a 1-click import
+        try:
+            if read_markdown_csv(output_file_path):
+                command.append("--infilter=CSV:124,34,76")
+        except Exception:
+            pass  # If the file can't be read, it will just fall back to the standard CSV import
+        ##### Add the file path to the command
+        command.append(str(output_file_path))
+        ##### Launch LibreOffice Calc using the joined-up command
+        subprocess.Popen(command)
+    ##### If the launch attempt fails, tell the user that it failed and provide relevant details
+    except Exception as error:
+        ui_event("error", f"Failed to open LibreOffice Calc:\n{error}")
 
-        # UI Feedback
-        orig_text = button.cget("text")
-        button.config(text=success_message)
-        app.after(3000, lambda: button.config(text=orig_text))
 
-    except Exception as e:
-        ui_event("error", f"Save failed: {e}")
+### Define a function to... save the temporary output file permanently
+def save_output(app, button, default_text, success_text):
+    """Saves the output file to the user's chosen location."""
+    #### Verify that a successful run has occurred and exit if it hasn't
+    if not last_run_successful:
+        return ui_event("warn", "You must Run Scripts before attempting to save its output file.")
+    #### Validate the user input
+    name = inputs["output_name"].get()
+    folder = inputs["output_folder"].get()
+    if not (name and folder):
+        return ui_event("warn", "Select a file name and output folder.")
+    #### Attempt to perform the entire save operation
+    try:
+        ##### Ask the user to confirm the overwrite if the file already exists
+        new_filepath = resolve_path(folder) / f"{name}.csv"
+        if new_filepath.exists():  # (Inside the try block to catch permission errors)
+            if not messagebox.askyesno("Confirm", f"Overwrite {new_filepath.name}?"):
+                return
+        ##### Create the target folder if it's missing and then save the output file
+        new_filepath.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(SAPP["output_csv"]["path"] / SAPP["output_csv"]["name"], new_filepath)
+        ##### If successful, inform the user without generating a popup they would have to dismiss
+        button.config(text=success_text)
+        app.after(3000, lambda: button.config(text=default_text))  # Resets back to normal after 3s
+    ##### If the save failed, inform the user and provide diagnostic details
+    except Exception as error:
+        ui_event("error", f"Save failed: {error}")
 
 
 # endregion --- Back-end functions have been defined ---
@@ -502,13 +494,13 @@ def create_user_interface(app):
         "af_hover": "Load autofill",
     }
 
-    ### Define functions for performing front-end tasks
+    ### --- Define functions for performing front-end tasks ---
 
     #### Define a function to... update entry box text in the UI
-    def update_ui_entry(entry_box, new_path):
+    def update_ui_entry(entry_box, new_path, is_folder=False):
         """Helper function to update a UI entry box with a pre-formatted and shortened filepath."""
         ### Call the helper function to get the pre-formatted display path
-        display_path = get_display_path(new_path)
+        display_path = get_display_path(new_path, is_folder)
         #### Perform the process for inserting the display path into the UI entry box
         entry_box.config(state="normal", fg="black")  # Changes text color from grey to black
         entry_box.delete(0, tk.END)  # Clears any existing text content first
@@ -523,44 +515,58 @@ def create_user_interface(app):
             autofill_path = fd.askopenfilename(
                 initialdir=SAPP["autofills"]["path"], filetypes=SAPP["autofills"]["type"]
             )
-        ##### If a path was provided, or has now been chosen, proceed with loading it.
+        ##### If a path was provided, or has now been chosen, attempt to load it.
         if autofill_path:
             try:
+                ###### Parse the file's data into a dictionary (filtering for valid 2-column rows)
                 data_rows = read_markdown_csv(autofill_path)
                 data = {row[0]: row[1] for row in data_rows if len(row) == 2}
-
+                ###### Check if data was actually found
+                if not data:
+                    return ui_event("warn", "No valid autofill settings were found.")
+                ###### Iterate through the loaded data and update the matching UI fields
                 for key, value in data.items():
+                    ####### Handle the special "Save logs?" checkbox (converts text to boolean)
+                    if key == UI["log?"] or key == "log?":
+                        if value:  # This prevents blank values from changing the setting
+                            inputs["log?"].set(value.lower() in ["yes", "true", "1"])
+                        continue
+                    ####### Update the UI entry box if the key matches a known input
                     if key in inputs:
-                        update_ui_entry(inputs[key], value)
+                        update_ui_entry(inputs[key], value, is_folder=(key == "output_folder"))
+                        ######## Change the loaded text to black if it's a box with grey hint text
                         if key in optional_entry_box_refs:
                             optional_entry_box_refs[key]["entry"].config(fg="black")
-
-                ##### If a main_script was autofilled, call its automatic fetching process.
+                ###### If a main_script was autofilled, call its automatic fetching process.
                 if "main_script" in data:
                     select_main_script(inputs["main_script"], instructions_box)
+            ##### If the loading process failed for some reason, inform the user
             except Exception as error:
                 ui_event("error", f"Could not load autofill file:\n{error}")
 
-    #### Define a function to... give browse buttons the correct command
+    #### Define a function to... give each browse button the correct command
     def browse_cmd(entry_box, SAPP_key, type="file"):
         """Creates a factory function for making each browse button work correctly when pressed."""
 
+        ##### Define the specific command function that runs when clicked
         def on_browse_click():
-            path = None  # Prevents errors if neither of the following conditions are true
+            ###### Open the correct type of selection dialog based on the button type
             if type == "file":  # If the browse button is for selecting a file (the default)
                 path = fd.askopenfilename(initialdir=SAPP_key["path"], filetypes=SAPP_key["type"])
             elif type == "folder":  # Alternately, if the browse button is for selecting a folder
                 path = fd.askdirectory(initialdir=SAPP_key["path"])
-            if path:  # If a file or folder path has been selected...
-                update_ui_entry(entry_box, path)  # Update the UI
+            ###### If a valid path was chosen, update the entry box in the UI
+            if path:
+                update_ui_entry(entry_box, path, is_folder=(type == "folder"))
 
+        ###### Return the internal function to be assigned to the button
         return on_browse_click
 
-    ### Define functions for creating the repetitive UI elements
+    ### --- Define functions for creating the repetitive UI elements ---
 
     #### Layout frame template (Tkinter's equivalent of a HMTL <div>)
     def draw_frame_row(row):
-        """Creates a Tkinter frame with some default values."""
+        """Creates a Tkinter frame with some standardized values."""
         frame = tk.Frame(app)  # Draws the frame on ScriptApp's base window
         frame.grid(row=row, column=0, pady=4)  # Sets the standard values with 4px vertical spacing
         return frame  # Returns the frame so it can be modified outside of this function
@@ -575,9 +581,9 @@ def create_user_interface(app):
         initial_text = SAPP[input_key].get("default", SAPP[input_key].get("hint", ""))
         update_ui_entry(entry_box, str(initial_text))  # Adds default or hint inside the entry box
         inputs[input_key] = entry_box  # Registers the entry box outside of this function
-        if suffix is not None:  # Adds a text suffix if one has been specified
+        if suffix is not None:  # Adds a text suffix if it was provided
             right_widget = tk.Label(frame, text=suffix)
-        else:  # Adds a browse button if no suffix was specified (the assumed default)
+        else:  # Adds a browse button if no suffix was provided (the assumed default)
             browse_command = browse_cmd(entry_box, SAPP[input_key], type)  # Makes the button work
             right_widget = tk.Button(frame, text=UI["browse"], command=browse_command)
         right_widget.grid(row=1, column=1)  # Places the label/button to the right of the entry box
@@ -596,30 +602,38 @@ def create_user_interface(app):
             inputs[key] = entry_box
             optional_entry_box_refs[key] = {"entry": entry_box}
 
+            ##### Define a factory function to create unique focus event handlers each box
             def make_focus_handlers(current_box, current_key):
+                ###### Capture the specific hint text for this key (closure capture)
                 hint_text = SAPP[current_key]["hint"]
 
+                ###### Define the behaviour when the user clicks inside the box (remove hint)
                 def on_focus_in(event):
                     if current_box.cget("fg") == HINT_COLOR:
                         current_box.delete(0, tk.END)
                         current_box.config(fg="black")
 
+                ###### Define the behaviour when the user clicks away (restore hint if empty)
                 def on_focus_out(event):
                     if not current_box.get():
                         current_box.insert(0, hint_text)
                         current_box.config(fg=HINT_COLOR)
 
+                ###### Return the configured handlers
                 return on_focus_in, on_focus_out
 
+            ##### Create and bind the focus handlers to the entry box
             focus_in_handler, focus_out_handler = make_focus_handlers(entry_box, key)
             entry_box.bind("<FocusIn>", focus_in_handler)
             entry_box.bind("<FocusOut>", focus_out_handler)
+            ##### Create the browse button and place it next to the entry box
             button = tk.Button(frame, text=UI["browse"], command=browse_cmd(entry_box, SAPP[key]))
             button.grid(row=i, column=1)
             optional_entry_box_refs[key]["button"] = button
-        return frame
+        return frame  # Returns the frame so it can be modified outside of this function
 
     ### Lay out all the UI components (this code is ordered top to bottom)
+
     #### Draw the base application window
     app.title(f"{APP_TITLE} (v{__version__}) SAPPv{SAPP['SAPP_version']}")  # Sets the topbar title
     app.geometry(UI_WINDOW_GEOMETRY)  # Sets the size of the window below the topbar
@@ -633,7 +647,7 @@ def create_user_interface(app):
     instr_frame_lv2 = tk.Frame(instr_frame_lv3)
     instr_frame_lv2.pack()
     instr_frame_lv1 = tk.Frame(instr_frame_lv2, width=704, height=424, relief="sunken", bd=1)
-    instr_frame_lv1.pack_propagate(False)
+    instr_frame_lv1.pack_propagate(False)  # (This makes instructions_box exactly 700px wide)
     instr_frame_lv1.pack(side="left")
     instructions_box = tk.Text(instr_frame_lv1, wrap="word", bd=0, highlightthickness=0)
     instructions_box.pack(fill="both", expand=True)
@@ -675,15 +689,15 @@ def create_user_interface(app):
     draw_ui_main(6, "output_folder", type="folder")  # Uses folder selection instead of file
     save_button_frame = draw_frame_row(7)
     save_button = tk.Button(save_button_frame, text=UI["save"], width=12)  # Stops width shrinking
-    save_button.config(command=lambda: save_output(app, save_button, UI["save_good"]))
+    save_button.config(command=lambda: save_output(app, save_button, UI["save"], UI["save_good"]))
     save_button.pack()
 
-    #### Draw the log toggler (bottom left)
-    inputs["log?"] = tk.BooleanVar(value=True)  # Have it enabled by default
+    #### Draw the toggler to enable/disable logging (bottom left)
+    inputs["log?"] = tk.BooleanVar(value=True)  # Makes it enabled by default
     log_checkbox = tk.Checkbutton(app, text=UI["log?"], var=inputs["log?"], activebackground=bg0)
     log_checkbox.place(relx=0.0, rely=1.0, x=0, y=-4, anchor="sw")
 
-    #### Draw the autofill icon button with a hoverable tooltip (bottom right)
+    #### Draw the autofill icon button with a hoverable text label (bottom right)
     af_btn = tk.Button(app, image=UI["af_icon"], command=load_autofill, bd=0, activebackground=bg0)
     af_btn.place(relx=1.0, rely=1.0, x=-4, y=-4, anchor="se")
     af_tooltip = tk.Label(app, text="")
@@ -702,12 +716,9 @@ if __name__ == "__main__":  # If the script is being executed directly (instead 
     ### Create any required folders that are missing during application startup
     for path in SAPP["folders"]:
         path.mkdir(parents=True, exist_ok=True)
-    ### Create the UI
-    #### Create a blank Tkinter window assigned to "app"
-    app = tk.Tk()
-    ##### Call the function to create the UI on that blank window
-    create_user_interface(app)
-    #### Start the UI and keep it running so the user can interact with it
-    app.mainloop()
+    ### Launch the UI
+    scriptapp = tk.Tk()  # Creates a blank Tkinter window assigned to a variable named "scriptapp"
+    create_user_interface(scriptapp)  # Calls the function to create the UI on that blank window
+    scriptapp.mainloop()  # Starts the UI and keeps it running so the user can interact with it
 
 # endregion --- Front-end UI code has been defined ---
