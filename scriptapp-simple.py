@@ -4,7 +4,7 @@
 Explicitly Stated Intentions:
 1. Act as a user-friendly wrapper for running Intentionalist data processing scripts.
 2. Demonstrate a minimal implementation of the ScriptApp Processing Protocol (SAPP) that...
-    2.1. Has just enough features to be useful.
+    2.1. Has enough features to be useful for real admin work, not just as a toy demonstration.
     2.2. Is as self-contained as possible.
     2.3. Has short, simple and well-documented code, so that inexperienced coders (who might not
     have read the source code of *any* other program) can understand exactly how it works and
@@ -15,7 +15,7 @@ Explicitly Stated Intentions:
 
 ## Define special dunder (double underscore) variables
 __author__ = "bendini"  # The Github username of this script's owner/maintainer
-__version__ = "0.2.007"  # (This version number is also displayed in the UI for screenshot purposes)
+__version__ = "0.2.011"  # (This version number is also displayed in the UI for screenshot purposes)
 
 ## Import relevant modules from the Python Standard Library (reason for use given in side comments)
 import ast  # Used for safely parsing Python code to extract docstrings
@@ -45,6 +45,8 @@ P_SCRIPTS = BASE_FOLDER / "scripts"  # ...Python scripts
 P_VALIDS = P_SCRIPTS / "validation"  # ...Python validation scripts
 P_MODULES = P_SCRIPTS / "py-modules"  # ...Python modules written for our ecosystem
 P_RUST = P_SCRIPTS / "rust-code"  # ...compiled Rust extensions & source code
+P_TOOLS = BASE_FOLDER / "tools"  # ...tools that enhance ScriptApp
+P_UV = P_TOOLS / "uv-versions"  # ...non-system versions of the uv virtual environment manager
 P_AUTOFILLS = BASE_FOLDER / "autofills"  # ...auto-filling config data
 P_LOGS = BASE_FOLDER / "logs"  # ...logging data
 P_TEMP = P_LOGS / "old-tempfiles"  # ...old console logs and output.csv files
@@ -64,38 +66,44 @@ CSV_AUTOFILL = [("CSV autofill files", "*.csv")]
 ### Create a reference dictionary for the ScriptApp Processing Protocol data
 SAPP = {  # (Arguments have fixed positions, allowing scripts to use sys.argv[n] to receive them)
     #### Mandatory protocol arguments
-    "main_script": {"path": P_SCRIPTS, "type": PY_SCRIPT, "hint": ""},  # sys.argv[0]
-    "input_csv": {"path": P_DATA, "type": CSV_DATA, "hint": ""},  # sys.argv[1]
-    "output_csv": {"path": BASE_FOLDER, "name": TEMP_OUTPUT_NAME},  # sys.argv[2]
+    "main_script": {"path": P_SCRIPTS,   "type": PY_SCRIPT, "hint": ""},  # sys.argv[0]
+    "input_csv":   {"path": P_DATA,      "type": CSV_DATA,  "hint": ""},  # sys.argv[1]
+    "output_csv":  {"path": BASE_FOLDER, "name": TEMP_OUTPUT_NAME},       # sys.argv[2]
     #### Optional extended protocol arguments
-    "data2": {"path": P_DATA, "type": CSV_DATA, "hint": "data2"},  # sys.argv[3]
-    "data3": {"path": P_DATA, "type": CSV_DATA, "hint": "data3"},  # sys.argv[4]
-    "data4": {"path": P_DATA, "type": CSV_DATA, "hint": "data4"},  # sys.argv[5]
+    "data2": {"path": P_DATA,     "type": CSV_DATA, "hint": "data2"},              # sys.argv[3]
+    "data3": {"path": P_DATA,     "type": CSV_DATA, "hint": "data3"},              # sys.argv[4]
+    "data4": {"path": P_DATA,     "type": CSV_DATA, "hint": "data4"},              # sys.argv[5]
     "data5": {"path": P_AGN_DATA, "type": AGN_DATA, "hint": "data5 (all types)"},  # sys.argv[6]
-    "valscriptA": {"path": P_VALIDS, "type": PY_V_SCRIPT, "hint": "valscriptA"},  # sys.argv[7]
-    "valscriptB": {"path": P_VALIDS, "type": PY_V_SCRIPT, "hint": "valscriptB"},  # sys.argv[8]
+    "valscriptA": {"path": P_VALIDS, "type": PY_V_SCRIPT, "hint": "valscriptA" },  # sys.argv[7]
+    "valscriptB": {"path": P_VALIDS, "type": PY_V_SCRIPT, "hint": "valscriptB" },  # sys.argv[8]
     #### ScriptApp's enhanced feature set
-    "SAPP_version": "0.2",  # (Increases if a breaking change is made to the protocol)
+    "SAPP_version": "0.3",  # (Increases if a breaking change is made to the protocol)
     "python_version": "3.12.3",  # The Python version that scripts should expect by default
     ##### ScriptApp's outer validation wrapper
-    "prescript": {"path": P_VALIDS, "type": PY_V_SCRIPT, "hint": "prescript"},  # Runs before main
+    "prescript":  {"path": P_VALIDS, "type": PY_V_SCRIPT, "hint": "prescript" },  # Runs before main
     "postscript": {"path": P_VALIDS, "type": PY_V_SCRIPT, "hint": "postscript"},  # Runs after main
-    "output_name": {"default": ""},  # Used to rename output_csv if it was successful
+    "output_name":   {"default": ""},  # Used to rename output_csv if it was successful
     "output_folder": {"path": P_DATA, "default": P_DATA},  # The final output_csv save location
-    "metadata": ["SAPP version", "Python version", "extras disabled"],  # Found in script docstring
+    "metadata": ["SAPP version", "Python version", "extras disabled", "run with uv?", "uv version",
+                 "uv flags"],  # Optional metadata that ScriptApp can make use of
     ##### The ordered sequence of arguments that will be passed for each script type
-    "optional_arg_keys": ["data2", "data3", "data4", "data5", "valscriptA", "valscriptB"],
+    "optional_arg_keys":    ["data2", "data3", "data4", "data5", "valscriptA", "valscriptB"],
     "main_script_arg_keys": ["main_script", "input_csv", "output_csv", "optional_arg_keys"],
-    "prescript_arg_keys": ["prescript", "main_script_arg_keys", "postscript"],
-    "postscript_arg_keys": ["postscript", "output_csv", "main_script"],
-    ##### Automatic form input filling and folder creation
+    "prescript_arg_keys":   ["prescript", "main_script_arg_keys", "postscript"],
+    "postscript_arg_keys":  ["postscript", "output_csv", "main_script"],
+    ##### Built-in Python virtual environment management
+    "python_uv": {"standard_version": "0.9.16", "path": P_UV},
+    "uv_allowed_flags": ["--python", "--preview", "--offline", "--reinstall", "--verbose"],
+    ##### Automatic actions taken on behalf of the user (fetching, form-filling, logging, creating)
+    "script_instructions": {"format_priority": [".md", "docstring"]},  # Displays documentation
     "autofills": {"path": P_AUTOFILLS, "type": CSV_AUTOFILL},  # Autofill folder for manual loading
     "af_override_file": {"path": BASE_FOLDER, "name": AF_OVERRIDE_NAME},  # Autofill on startup file
-    "folders": [P_DATA, P_AGN_DATA, P_SCRIPTS, P_VALIDS, P_MODULES, P_RUST, P_AUTOFILLS, P_TEMP],
-    ##### Automatic saving of output data and console logs from previous runs
     "console_file": {"path": BASE_FOLDER, "name": TEMP_CONSOLE_NAME},  # Captures all console output
     "last_outputs_archive": {"path": P_TEMP},  # Where the old logs and output CSVs are saved
-}
+    "folders": [P_DATA, P_AGN_DATA, P_SCRIPTS, P_VALIDS, P_MODULES, P_RUST, P_TOOLS, P_UV,
+                P_AUTOFILLS, P_TEMP]  # The list of folders to create inside the BASE_FOLDER
+}  # fmt: skip
+#     ^ "# fmt: skip" tells Ruff not to apply its formatting rules to this dictionary
 
 ### Define some constants for the UI (a UI label dictionary is also defined later)
 APP_TITLE = "ScriptApp"  # Name of the application that's displayed in the UI
@@ -112,6 +120,7 @@ inputs = {}  # Used to store inputs made into the UI by the user
 last_run_successful = False  # Used to check if the last run was successfully completed
 log_file = None  # Holds the reference to the open console log file
 optional_entry_box_refs = {}  # Used for toggling optional input boxes
+metadata = {}  # Used to store the metadata settings from the currently selected script
 
 
 # endregion --- Initial setup completed ---
@@ -192,24 +201,46 @@ def ui_event(message_type, message):
         print("ui_event function error: invalid message type specified")
 
 
-### Define a function to... handle our special Markdown table CSV format
-def read_markdown_csv(file_path=None, content=None):
+### Define a function to... read our special Markdown table CSV format
+def read_markdown_csv(filepath=None, content=None):
     """Safely reads a Markdown-formatted CSV file."""
     #### If content isn't provided as raw data, read it from the file provided
-    if content is None and file_path:
-        content = Path(file_path).read_text(encoding="utf-8")
-    #### If we still don't have content (e.g. file_path was None), return an empty list
+    if content is None and filepath:
+        content = Path(filepath).read_text(encoding="utf-8")
+    #### If we still don't have content (e.g. filepath was None), return an empty list
     if not content:
         return []
-    #### Split the content into lines
+    #### Once we have the data content...
+    ##### Split the content into lines
     lines = content.strip().splitlines()
-    #### Find the index of the separator line (---) to determine where data begins
+    ##### Find the index of the separator line (---) to determine where data begins
     start = next((i + 1 for i, y in enumerate(lines) if "---" in y), -1)
-    #### If no separator is found or the index is invalid, return an empty list
+    ##### If no separator is found or the index is invalid, return an empty list
     if start <= 0 or start >= len(lines):
         return []
-    #### Parse the data rows by splitting on the pipe separator and removing any space padding
+    ##### Otherwise, return the lines spit at the pipe separator with any space padding removed
     return [[c.strip() for c in y.split("|")] for y in lines[start:]]
+
+
+### Define a function to... extract metadata from a script file
+def load_script_metadata(path):
+    """Parses the script's docstring to load or update its metadata."""
+    #### State the global variables this function may change
+    global metadata
+    #### Reset the metadata dictionary (so this function will live-reload when called)
+    metadata = {}
+    #### Attempt to read the metadata from the Python script
+    try:
+        content = path.read_text(encoding="utf-8")
+        docstring = ast.get_docstring(ast.parse(content))
+        if docstring:
+            rows = read_markdown_csv(content=docstring)
+            metadata.update({r[0].strip(): r[1].strip() for r in rows if len(r) >= 2})
+        ##### Return the docstring so the UI can use it for instructions if necessary
+        return docstring
+    #### If it fails due to absence or a parsing error, return no metadata
+    except Exception:
+        return None
 
 
 ## --- Define the complex event handler functions (listed in order of use) ---
@@ -222,18 +253,15 @@ def select_main_script(entry_box, instructions_box):
     path = resolve_path(entry_box.get())
     if not path or not path.is_file():
         return
-    #### Extract the docstring and metadata Markdown table from the provided script if it's present
-    docstring, disabled_keys = None, []
-    try:
-        content = path.read_text(encoding="utf-8")
-        docstring = ast.get_docstring(ast.parse(content))
-        if docstring:
-            rows = read_markdown_csv(content=docstring)
-            data = {r[0].strip(): r[1].strip() for r in rows if len(r) >= 2}
-            if "extras disabled" in data:
-                disabled_keys = [x.strip() for x in data["extras disabled"].split(",")]
-    except Exception:
-        pass
+
+    #### Extract the docstring and metadata using the helper function
+    docstring = load_script_metadata(path)
+
+    #### Process specific UI-affecting metadata (disabled keys)
+    disabled_keys = []
+    if "extras disabled" in metadata:
+        disabled_keys = [x.strip() for x in metadata["extras disabled"].split(",")]
+
     #### Update the optional UI boxes based on the metadata that was found
     for key in SAPP["optional_arg_keys"]:
         if key in optional_entry_box_refs:  # (This condition seperates the protocol from the UI)
@@ -250,22 +278,34 @@ def select_main_script(entry_box, instructions_box):
                 is_hint = entry.get() == SAPP[key]["hint"]
                 entry.config(state="normal", fg=HINT_COLOR if is_hint else "black")
                 button.config(state="normal")
+
     #### Load the instructions
     ##### Clear any existing text from the instructions box first
     instructions_box.config(state="normal")
     instructions_box.delete("1.0", tk.END)
+    ##### Go through the list of formats in the SAPP dictionary in order of priority
     try:
-        ##### Attempt to find and load Markdown instructions with the same name as the script
-        md_path = path.with_suffix(".md")
-        if md_path.exists():
-            instructions_box.insert(tk.END, md_path.read_text(encoding="utf-8"))
-        ##### If no Markdown file was present, fallback to its Python docstring
-        else:
-            instructions_box.insert(tk.END, docstring if docstring else "No instructions found.")
-    ##### If there was an error instead of a mere absence, insert the message into the box
+        for format in SAPP["script_instructions"]["format_priority"]:
+            ###### If the listed format is Markdown, check if "script-path/script-name.md" exists
+            if format == ".md":
+                md_path = path.with_suffix(".md")
+                if md_path.exists():
+                    ####### Load the Markdown file into the instructions box and stop the search
+                    instructions_box.insert(tk.END, md_path.read_text(encoding="utf-8"))
+                    break
+            ###### If the listed format is docstring, check if the script contains a docstring
+            elif format == "docstring":
+                if docstring:
+                    ####### Load the docstring into the instructions box and stop the search
+                    instructions_box.insert(tk.END, docstring)
+                    break
+        ##### If the loop finished without finding any instructions, write this in the box
+        if not instructions_box.get("1.0", "end-1c"):
+            instructions_box.insert(tk.END, "No instructions found.")
+    ##### If there was an error instead of a mere absence, write an error message in the box
     except Exception:
         instructions_box.insert(tk.END, "Error reading instructions.")
-    #### Prevent the user from editing the box contents once loaded (also improves tab navigation)
+    #### Prevent the user from editing the box contents once loaded (to improve tab navigation)
     instructions_box.config(state="disabled")
 
 
@@ -274,8 +314,31 @@ def run_scripts(app, run_button, success_label, success_message):
     """Central function that executes the script processing pipeline."""
     #### State the global variables this function may change
     global last_run_successful, log_file
+
     #### Capture user inputs once so we don't need to retreive them for each script
     filepaths = {key: value.get() for key, value in inputs.items()}
+
+    #### Define a helper function to... locate the correct uv executable
+    def find_uv_executable():
+        """Finds the correct uv executable."""
+        ##### [intention comment goes here]
+        target_version = metadata.get("uv version", SAPP["python_uv"]["standard_version"])
+
+        ##### Check for a system-installed version of uv
+        system_uv = shutil.which("uv")
+        if system_uv:
+            ###### If uv was found in the system folder, check which version it is
+            try:
+                result = subprocess.check_output([system_uv, "--version"], text=True)
+                ####### If it's the requested version, use that
+                if target_version in result:
+                    return "uv"  # Return just the command name so it will print nicely
+            except subprocess.CalledProcessError:
+                pass
+        ##### If uv wasn't found or was the wrong version, check the ScriptApp folder
+        extension = ".exe" if platform.system() == "Windows" else ""
+        local_uv = SAPP["python_uv"]["path"] / f"uv-{target_version}{extension}"  # e.g. uv-0.9.14
+        return get_display_path(local_uv) if local_uv.exists() else None
 
     #### Define a helper function to... run each of the 3 external script types (pre/main/post)
     def run_this_script(key_list):
@@ -311,7 +374,26 @@ def run_scripts(app, run_button, success_label, success_message):
         arguments = list(unpack_keys(key_list))
         while arguments and arguments[-1] == "x":
             arguments.pop()
-        command = ["python3", *arguments]
+
+        ##### Check whether we should be running the main_script command with uv
+        if key == "main_script" and metadata.get("run with uv?") == "yes":
+            ###### Locate the uv executable
+            uv_executable = find_uv_executable()
+            if not uv_executable:
+                return ui_event("error", "A version of uv was requested but it couldn't be found.")
+            ###### Build the uv command with anti-spam flags and permitted user flags
+            command = [uv_executable, "run", "--no-progress"]
+            raw_flags = metadata.get("uv flags", "")
+            for flag in shlex.split(raw_flags):
+                if flag.split("=")[0] in SAPP["uv_allowed_flags"]:
+                    command.append(flag)
+                else:
+                    return ui_event("error", f"Security Error: The flag '{flag}' is not allowed.")
+            command.extend(arguments)
+        ###### Fallback to the standard python3 command if uv was not requested
+        else:
+            command = ["python3", *arguments]
+
         print(f"--- Command line argument:\n{shlex.join(command)}\n")
         ##### Execute the script and handle errors
         try:
@@ -338,20 +420,34 @@ def run_scripts(app, run_button, success_label, success_message):
         if not resolve_path(path).is_file():  # Does the file actually exist?
             return ui_event("warn", f"The selected {label} could not be found:\n{path}")
 
+    #### Force a metadata refresh from the file on disk
+    main_path = resolve_path(inputs["main_script"].get())
+    if main_path and main_path.is_file():
+        load_script_metadata(main_path)
+
     #### Perform the initial setup for the run
     ##### Disable the Run Scripts button in the UI to prevent interference during processing
     run_button.config(state="disabled")
-    ##### Force a UI update immediately (since it will freeze during processing)
+    ##### Force the app to update its UI immediately (since it will freeze during processing)
     app.update()
     ##### Start the total execution timer
     start_time = time.monotonic()
     ##### Create a fresh console log file if logging is enabled
     if inputs["log?"].get():
-        log_file_path = SAPP["console_file"]["path"] / SAPP["console_file"]["name"]
-        log_file = open(log_file_path, "w", encoding="utf-8")
+        log_filepath = SAPP["console_file"]["path"] / SAPP["console_file"]["name"]
+        log_file = open(log_filepath, "w", encoding="utf-8")
     ##### Announce the start of the run in the console
     start_utc = f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M:%S} UTC"
     print(f"--- [start] - ScriptApp run started at: {start_utc} ---\n")
+
+    ##### Check SAPP and Python versions and print a console message if there's a mismatch
+    checks = [("SAPP version", SAPP["SAPP_version"])]
+    if metadata.get("run with uv?") != "yes":  # Only check Python version if uv isn't handling it
+        checks.append(("Python version", SAPP["python_version"]))
+    for key, SAPP_ver in checks:
+        script_ver = metadata.get(key)
+        if script_ver and script_ver != SAPP_ver:
+            print(f"{key} mismatch: script wants {script_ver} but SAPP specifies {SAPP_ver}\n")
 
     #### Attempt to execute the script pipeline
     try:
@@ -385,13 +481,16 @@ def run_scripts(app, run_button, success_label, success_message):
         if inputs["log?"].get():
             ###### Archive the console log
             archive_folder = SAPP["last_outputs_archive"]["path"]
-            if log_file_path.exists():  # (Prevents errors if it doesn't exist)
-                shutil.copy(log_file_path, archive_folder / f"{timestamp}-console.txt")
+            if log_filepath.exists():  # (Prevents errors if it doesn't exist)
+                shutil.copy(log_filepath, archive_folder / f"{timestamp}-console.txt")
             ###### Archive the output CSV if the run was successful
-            if last_run_successful:
-                output_file = SAPP["output_csv"]["path"] / SAPP["output_csv"]["name"]
-                if output_file.exists():  # (Prevents errors if it doesn't exist)
-                    shutil.copy(output_file, archive_folder / f"{timestamp}-last-output.csv")
+            output_file = SAPP["output_csv"]["path"] / SAPP["output_csv"]["name"]
+            archive_csv = archive_folder / f"{timestamp}-last-output.csv"
+            if last_run_successful and output_file.exists():
+                shutil.copy(output_file, archive_csv)
+            ###### If the last run failed, create an empty file to indicate no output
+            else:
+                archive_csv.touch()
         ##### Re-enable the button after a minimum 1 sec delay (to prevent UTC timestamp conflicts)
         delay = max(0, 1000 - int((time.monotonic() - start_time) * 1000))  # (1000 milliseconds)
         app.after(delay, lambda: run_button.config(state="normal"))
@@ -404,10 +503,14 @@ def view_output():
     if not last_run_successful:
         return ui_event("warn", "Run Scripts must succeed before trying to view its output.")
     #### Construct the full output file path from the SAPP dictionary
-    output_file_path = SAPP["output_csv"]["path"] / SAPP["output_csv"]["name"]
+    output_filepath = SAPP["output_csv"]["path"] / SAPP["output_csv"]["name"]
     #### Check if an output file exists
-    if not output_file_path.exists():
+    if not output_filepath.exists():
         return ui_event("error", "Output file not found. Please run scripts first.")
+    #### Check if the file is already open
+    lock_file = output_filepath.parent / f".~lock.{output_filepath.name}#"
+    if lock_file.exists():
+        return ui_event("warn", "The output file is already open, please close it first.")
     #### Attempt to launch the application
     try:
         ##### Determine the executable command (Default to Linux "libreoffice" command)
@@ -423,15 +526,20 @@ def view_output():
         command = [executable, "--calc"]
         ##### If the file uses our mdcsv format, add flags that will allow a 1-click import
         try:
-            if read_markdown_csv(output_file_path):
+            if read_markdown_csv(content=output_filepath.read_text(encoding="utf-8")[:2048]):
                 command.append("--infilter=CSV:124,34,76")
         except Exception:
             pass  # If the file can't be read, it will just fall back to the standard CSV import
         ##### Add the file path to the command
-        command.append(str(output_file_path))
+        command.append(str(output_filepath))
+
         ##### Launch LibreOffice Calc using the joined-up command
-        subprocess.Popen(command)
-    ##### If the launch attempt fails, tell the user that it failed and provide relevant details
+        kwargs = {}
+        if system != "Windows":  # Does this on MacOS and Linux
+            kwargs["start_new_session"] = True
+        subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
+
+    ##### If the launch attempt fails, inform the user and provide relevant details
     except Exception as error:
         ui_event("error", f"Failed to open LibreOffice Calc:\n{error}")
 
@@ -451,7 +559,7 @@ def save_output(app, button, default_text, success_text):
     try:
         ##### Ask the user to confirm the overwrite if the file already exists
         new_filepath = resolve_path(folder) / f"{name}.csv"
-        if new_filepath.exists():  # (Inside the try block to catch permission errors)
+        if new_filepath.exists():  # (This is inside the try block to catch file permission errors)
             if not messagebox.askyesno("Confirm", f"Overwrite {new_filepath.name}?"):
                 return
         ##### Create the target folder if it's missing and then save the output file
@@ -555,9 +663,8 @@ def create_user_interface(app):
                 path = fd.askopenfilename(initialdir=SAPP_key["path"], filetypes=SAPP_key["type"])
             elif type == "folder":  # Alternately, if the browse button is for selecting a folder
                 path = fd.askdirectory(initialdir=SAPP_key["path"])
-            ###### If a valid path was chosen, update the entry box in the UI
-            if path:
-                update_ui_entry(entry_box, path, is_folder=(type == "folder"))
+            ###### Update the entry box in the UI (not providing a path will clear the box)
+            update_ui_entry(entry_box, path, is_folder=(type == "folder"))
 
         ###### Return the internal function to be assigned to the button
         return on_browse_click
